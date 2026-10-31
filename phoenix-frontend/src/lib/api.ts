@@ -67,11 +67,6 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   }
 
   if (!res.ok) {
-    if (res.status === 401 && typeof window !== "undefined") {
-      setToken(null);
-      clearCache();
-      window.dispatchEvent(new Event("phoenix:logout"));
-    }
     let detail = res.statusText;
     try {
       const body = await res.json();

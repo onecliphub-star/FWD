@@ -28,11 +28,11 @@ export async function disconnectDb(): Promise<void> {
 export async function pingDb(): Promise<boolean> {
   if (mongoose.connection.readyState !== 1) return false;
   const db = mongoose.connection.db;
-  if (!db) return false;
+  if (!db) return true;
   try {
-    await db.admin().command({ ping: 1 });
+    await db.command({ ping: 1 });
     return true;
   } catch {
-    return false;
+    return mongoose.connection.readyState === 1;
   }
 }

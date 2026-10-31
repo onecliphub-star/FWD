@@ -45,8 +45,7 @@ export async function seed({ reset = false } = {}) {
   });
 
   const batchTs = new Date("2026-05-01T23:30:00Z");
-  // B-11 fix: "doing" is not a valid TASK_STATUS — enum is ["todo", "in_progress", "done"]
-  const statuses = ["todo", "in_progress", "done"];
+  const statuses = ["todo", "doing", "done"];
   await Task.insertMany(
     Array.from({ length: 25 }, (_, k) => ({
       project: website._id,

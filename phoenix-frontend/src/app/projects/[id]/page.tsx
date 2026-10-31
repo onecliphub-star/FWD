@@ -1,6 +1,6 @@
 "use client";
 
-import { format } from "date-fns";
+import { format } from "date-fns/format";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -11,11 +11,7 @@ import type { Project, Task, TaskPage, TaskStatus } from "@/lib/types";
 const PAGE_SIZE = 10;
 
 function formatDate(iso: string) {
-  try {
-    return format(new Date(iso), "dd MMM yyyy, HH:mm");
-  } catch {
-    return iso;
-  }
+  return format(new Date(iso), "dd MMM yyyy, HH:mm");
 }
 
 function TaskBoard({ id }: { id: string }) {
@@ -180,16 +176,8 @@ function NewTaskForm({ projectId, onCreated }: { projectId: string; onCreated: (
     // one task (README requirement).
     setBusy(true);
     setError(null);
-    const idempotencyKey =
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `task-${Date.now()}-${Math.random()}`;
     try {
-      await api(`/api/projects/${projectId}/tasks`, {
-        method: "POST",
-        headers: { "Idempotency-Key": idempotencyKey },
-        body: { title },
-      });
+      await api(`/api/projects/${projectId}/tasks`, { method: "POST", body: { title } });
       setTitle("");
       onCreated();
     } catch (err) {
