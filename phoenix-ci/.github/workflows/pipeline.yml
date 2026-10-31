@@ -1,0 +1,137 @@
+name: Phoenix pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: phoenix-backend
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_URI: mongodb://localhost:27017/phoenix_test
+      JWT_SECRET: ci-only-secret-that-is-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: phoenix-backend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: phoenix-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: phoenix-frontend/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [backend, frontend]
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+    env:
+      MONGODB_URI: mongodb://localhost:27017/phoenix
+      JWT_SECRET: ci-only-secret-that-is-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Build, seed and start backend in the background
+        working-directory: phoenix-backend
+        run: |
+          npm ci
+          npm run build
+          npm run seed
+          nohup npm start > /tmp/backend.log 2>&1 &
+      - name: Start frontend in the background
+        working-directory: phoenix-frontend
+        run: |
+          npm ci
+          npm run build
+          nohup npm start > /tmp/frontend.log 2>&1 &
+      - name: Wait for the stack
+        run: bash scripts/wait-for.sh http://localhost:8000/api/health
+      - run: curl -fsS --max-time 15 http://localhost:3000/ > /dev/null
+      - name: Smoke test
+        run: bash scripts/smoke.sh http://localhost:8000 http://localhost:3000
+
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [e2e]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install pinned Vercel CLI
+        run: npm install --global vercel@39.3.0
+      - name: Deploy backend
+        working-directory: phoenix-backend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_BACKEND_PROJECT_ID }}
+        run: |
+          vercel link --yes --token "$VERCEL_TOKEN"
+          vercel deploy --prod --yes --token "$VERCEL_TOKEN"
+      - name: Deploy frontend
+        working-directory: phoenix-frontend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_FRONTEND_PROJECT_ID }}
+        run: |
+          vercel link --yes --token "$VERCEL_TOKEN"
+          vercel deploy --prod --yes --token "$VERCEL_TOKEN"
+
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [deploy]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify production with smoke test
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+        run: bash scripts/smoke.sh "$BACKEND_URL" "$FRONTEND_URL" "${{ github.sha }}"
